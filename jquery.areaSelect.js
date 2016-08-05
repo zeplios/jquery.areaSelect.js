@@ -22,6 +22,7 @@
 		this.areas = options.initAreas;
 		this.options = options;
 		this.status = AreaSelectStatus.CREATE;
+		this.fixRatio = options.fixRatio;
 		this.dragging = false;
 		this.resizeDirection = null;
 		this.dragAreaOffset = {};
@@ -151,6 +152,14 @@
 			case AreaSelectStatus.RESIZE:
 				area.width = x - area.x;
 				area.height = y - area.y;
+				if (this.fixRatio) {
+					var widthToHeight = Math.abs(area.width) / Math.abs(area.height);
+					if (widthToHeight < 1) {
+						area.height = area.height * widthToHeight;
+					} else {
+						area.width = area.width / widthToHeight;
+					}
+				}
 				break;
 			case AreaSelectStatus.MOVE:
 				area.x = (x + this.dragAreaOffset.x);
@@ -293,7 +302,8 @@
 			deleteMethod: 'click',//or doubleClick
 			padding: 3,
 			area: {strokeStyle: 'red', lineWidth: 2},
-			point: {size: 3, fillStyle: 'black'}
+			point: {size: 3, fillStyle: 'black'}, 
+			fixRatio: false
 		};
 		as = this.data('AreaSelect');
 		if (as == undefined && (method === undefined || $.isPlainObject(method))) {
