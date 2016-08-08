@@ -10,10 +10,10 @@
 	var AreaSelectStatus = {CREATE: 'create', MOVE: 'move', RESIZE: 'resize', NEAR: 'near'};
 	var AreaSelectType = {Rect: 'rect', CIRCLE: 'circle'};
 	var Direction = {
-		NE: {name: 'NE', x: 1, y: -1, cursor: 'nesw-resize'},
-		NW: {name: 'NW', x: -1, y: -1, cursor: 'nwse-resize'},
-		SE: {name: 'SE', x: 1, y: 1, cursor: 'nwse-resize'},
-		SW: {name: 'SW', x: -1, y: 1, cursor: 'nesw-resize'}
+		NE: {name: 'NE', x: 1, y: -1, cursor: 'nesw-resize', idx: 1},
+		NW: {name: 'NW', x: -1, y: -1, cursor: 'nwse-resize', idx: 0},
+		SE: {name: 'SE', x: 1, y: 1, cursor: 'nwse-resize', idx: 2},
+		SW: {name: 'SW', x: -1, y: 1, cursor: 'nesw-resize', idx: 3}
 	};
 	var DeleteMethod = {CLICK: 'click', DOUBLE_CLICK: 'doubleClick'};
 	var AreaSelectOption;
@@ -163,16 +163,7 @@
 		var area = this.currentArea;
 		switch (this.status) {
 			case AreaSelectStatus.RESIZE:
-				area.width = x - area.x;
-				area.height = y - area.y;
-				if (this.fixRatio) {
-					var widthToHeight = Math.abs(area.width) / Math.abs(area.height);
-					if (widthToHeight < 1) {
-						area.height = area.height * widthToHeight;
-					} else {
-						area.width = area.width / widthToHeight;
-					}
-				}
+				area.updateSize(x, y, this.fixRatio);
 				break;
 			case AreaSelectStatus.MOVE:
 				area.x = (x + this.dragAreaOffset.x);
@@ -260,17 +251,24 @@
 	var setAreaDirection = function (area, direction) {
 		if (area != undefined && direction != undefined) {
 			area.setAreaDirection(direction);
-			/*var x1 = area.x;
-			var x2 = area.x + area.width;
-			var y1 = area.y;
-			var y2 = area.y + area.height;
-			var width = Math.abs(area.width);
-			var height = Math.abs(area.height);
-			var minOrMax = {'1': Math.min, '-1': Math.max};
-			area.x = minOrMax[direction.x](x1, x2);
-			area.y = minOrMax[direction.y](y1, y2);
-			area.width = direction.x * width;
-			area.height = direction.y * height;*/
+		}
+	};
+
+	var getAngle = function (basex, basey, x, y) {
+		var dx = Math.abs(basex - x);
+		var dy = Math.abs(basey - y);
+		if (x < basex && y <= basey) {
+			return Math.atan(dy / dx);
+		} else if (x > basex && y <= basey) {
+			return Math.PI - Math.atan(dy / dx);
+		} else if (x > basex && y > basey) {
+			return Math.PI + Math.atan(dy / dx);
+		} else if (x < basex && y > basey) {
+			return 2 * Math.PI - Math.atan(dy / dx);
+		} else if (y <= basey) {
+			return Math.PI / 2;
+		} else {
+			return 3 * Math.PI / 2;
 		}
 	};
 
@@ -355,6 +353,19 @@
 		this.height = direction.y * height;
 	}
 
+	RectArea.prototype.updateSize = function(x, y, fixRatio) {
+		this.width = x - this.x;
+		this.height = y - this.y;
+		if (fixRatio) {
+			var widthToHeight = Math.abs(this.width) / Math.abs(this.height);
+			if (widthToHeight < 1) {
+				this.height = this.height * widthToHeight;
+			} else {
+				this.width = this.width / widthToHeight;
+			}
+		}
+	}
+
 	function EllipseArea(x, y, r1, r2, angle) {
 		this.x = x; // center x
 		this.y = y;
@@ -435,20 +446,32 @@
 	};
 
 	EllipseArea.prototype.setAreaDirection = function(direction) {
-		/*var x1 = area.x;
-		var x2 = area.x + area.width;
-		var y1 = area.y;
-		var y2 = area.y + area.height;
-		var width = Math.abs(area.width);
-		var height = Math.abs(area.height);
-		var minOrMax = {'1': Math.min, '-1': Math.max};
-		area.x = minOrMax[direction.x](x1, x2);
-		area.y = minOrMax[direction.y](y1, y2);
-		area.width = direction.x * width;
-		area.height = direction.y * height;*/
+		console.log(this.angle);
+		if (this.angle >= 0 && this.angle < Math.PI / 2) {
+			this.direction = direction.idx;
+		} else if (this.angle >= Math.PI / 2 && this.angle < Math.PI) {
+			this.direction = (direction.idx + 3) % 4;
+		} else if (this.angle >= Math.PI && this.angle < 3 * Math.PI / 2) {
+			this.direction = (direction.idx + 2) % 4;
+		} else {
+			this.direction = (direction.idx + 1) % 4;
+		}
 	}
 
-	EllipseArea.prototype.updateSize = function(x, y) {
+	EllipseArea.prototype.updateSize = function(x, y, fixRatio) {
+		console.log(this.direction);
+		var dx2 = (this.x - x) * (this.x - x);
+		var dy2 = (this.y - y) * (this.y - y);
+		if (this.direction == 0 || this.direction == 2) {
+			this.r1 = Math.sqrt(dx2 + dy2);
+			this.angle = Math.atan((this.y-y) / (this.x-x));
+		} else {
+			this.r2 = Math.sqrt(dx2 + dy2);
+			this.angle = Math.atan((this.y-y) / (this.x-x));
+		}
+		this.angle = getAngle(this.x, this.y, x, y) - this.direction * Math.PI / 2;
+		while (this.angle < 0) this.angle += 2 * Math.PI;
+		while (this.angle >= 2 * Math.PI) this.angle -= 2 * Math.PI;
 		/*var x1 = area.x;
 		var x2 = area.x + area.width;
 		var y1 = area.y;
