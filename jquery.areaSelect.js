@@ -1,14 +1,15 @@
 /**
  * Created by gongshw on 14/12/9.
  *
- * Updated by gongshw on 16/7/30.
+ * Updated by zhangfucheng on 16/8/9.
  */
 (function ($, undefined) {
 
 	console.log('jquery.areaSelect.js by Gongshw https://github.com/gongshw/jquery.areaSelect.js');
+	console.log('modified by zhangfucheng https://github.com/gongshw/jquery.areaSelect.js');
 
 	var AreaSelectStatus = {CREATE: 'create', MOVE: 'move', RESIZE: 'resize', NEAR: 'near'};
-	var AreaSelectType = {Rect: 'rect', CIRCLE: 'circle'};
+	var AreaSelectType = {RECT: 'rect', ELLIPSE: 'ellipse'};
 	var Direction = {
 		NE: {name: 'NE', x: 1, y: -1, cursor: 'nesw-resize', idx: 1},
 		NW: {name: 'NW', x: -1, y: -1, cursor: 'nwse-resize', idx: 0},
@@ -16,9 +17,7 @@
 		SW: {name: 'SW', x: -1, y: 1, cursor: 'nesw-resize', idx: 3}
 	};
 	var DeleteMethod = {CLICK: 'click', DOUBLE_CLICK: 'doubleClick'};
-	var AreaSelectOption;
-
-	var areaMask;
+	var areaSelectOption;
 
 	function AreaSelect($ele, options) {
 		this.$ele = $ele;
@@ -27,11 +26,15 @@
 		if (options.initAreas) {
 			for (var index in options.initAreas) {
 				var area = options.initAreas[index];
-				//this.areas.push(new RectArea(area.x, area.y, area.width, area.height));
-				this.areas.push(new EllipseArea(area.x+area.width/2, area.y+area.height/2, area.width/2, area.height/2, Math.PI / 4));
+				if (area.type == AreaSelectType.RECT) {
+					this.areas.push(new RectArea(area.x, area.y, area.width, area.height));
+				} else if (area.type == AreaSelectType.ELLIPSE) {
+					this.areas.push(new EllipseArea(area.x, area.y, area.r1, area.r2, area.angle));
+				}
+				
 			}
 		}
-		AreaSelectOption = options;
+		areaSelectOption = options;
 		this.options = options;
 		this.status = AreaSelectStatus.CREATE;
 		this.fixRatio = options.fixRatio;
@@ -79,7 +82,7 @@
 			if (get_offset_X(event) == moveDownPoint.x && get_offset_Y(event) == moveDownPoint.y) {
 				as.onClick(get_offset_X(event), get_offset_Y(event));
 			}
-			as.onDragStop();
+			as.onDragStop(event);
 		}).dblclick(function (event) {
 			as.onDoubleClick(get_offset_X(event), get_offset_Y(event));
 		});
@@ -96,7 +99,6 @@
 				break;
 			case AreaSelectStatus.CREATE:
 				var newArea = new RectArea(x, y, 0, 0);
-				//var newArea = {x: x, y: y, width: 0, height: 0};
 				this.areas.push(newArea);
 				this.currentArea = newArea;
 				this.status = AreaSelectStatus.RESIZE;
@@ -104,18 +106,27 @@
 		}
 	};
 
-	AreaSelect.prototype.onDragStop = function () {
+	AreaSelect.prototype.onDragStop = function (event) {
 		this.dragging = false;
 		switch (this.status) {
 			case AreaSelectStatus.RESIZE:
 				if (this.currentArea != undefined) {
-					if (this.currentArea.width == 0 && this.currentArea.height == 0) {
+						console.log(this.currentArea.checkValid());
+					if (this.currentArea.checkValid()) {
+						setAreaDirection(this.currentArea, Direction.SE);
+						if (event.ctrlKey) {
+							var oldArea = this.currentArea;
+							var newArea = new EllipseArea(oldArea.x + oldArea.width / 2, oldArea.y + oldArea.height / 2, 
+															oldArea.width / 2, oldArea.height / 2, 0);
+							this.deleteArea(oldArea);
+							this.currentArea = newArea;
+							this.areas.push(newArea);
+						}
+						this.triggerChange();
+					} else {
 						this.deleteArea(this.currentArea);
 						this.currentArea = undefined;
 						this.status = AreaSelectStatus.CREATE;
-					} else {
-						setAreaDirection(this.currentArea, Direction.SE);
-						this.triggerChange();
 					}
 				}
 				break;
@@ -236,18 +247,6 @@
 		this.$canvas.trigger("areasChange", {areas: this.areas});
 	};
 
-	var getPositionPoints = function (area) {
-		var points = {};
-		for (var d in Direction) {
-			points[d] = {
-				x: area.x + area.width * (Direction[d].x + 1) / 2,
-				y: area.y + area.height * (Direction[d].y + 1) / 2
-			};
-		}
-		return points;
-	};
-
-
 	var setAreaDirection = function (area, direction) {
 		if (area != undefined && direction != undefined) {
 			area.setAreaDirection(direction);
@@ -301,7 +300,7 @@
 		for (var index in positionPoints) {
 			var point = positionPoints[index];
 			g2d.beginPath();
-			g2d.arc(point.x, point.y, AreaSelectOption.point.size, 0, Math.PI * 2, true);
+			g2d.arc(point.x, point.y, areaSelectOption.point.size, 0, Math.PI * 2, true);
 			g2d.closePath();
 			g2d.fill();
 		}
@@ -366,6 +365,10 @@
 		}
 	}
 
+	RectArea.prototype.checkValid = function() {
+		return this.width > 0 && this.height > 0;
+	}
+
 	function EllipseArea(x, y, r1, r2, angle) {
 		this.x = x; // center x
 		this.y = y;
@@ -415,7 +418,7 @@
 		for (var index in positionPoints) {
 			var point = positionPoints[index];
 			g2d.beginPath();
-			g2d.arc(point.x, point.y, AreaSelectOption.point.size, 0, Math.PI * 2, true);
+			g2d.arc(point.x, point.y, areaSelectOption.point.size, 0, Math.PI * 2, true);
 			g2d.closePath();
 			g2d.fill();
 		}
@@ -425,10 +428,27 @@
 		var points = {};
 		var sin = Math.sin(this.angle);
 		var cos = Math.cos(this.angle);
-		points['NW'] = {x:this.x-this.r1*cos, y:this.y-this.r1*sin};
+		var ps = Array(4);
+		ps[0] = {x:this.x-this.r1*cos, y:this.y-this.r1*sin};
+		ps[1] = {x:this.x+this.r1*cos, y:this.y+this.r1*sin};
+		ps[2] = {x:this.x-this.r2*sin, y:this.y+this.r2*cos};
+		ps[3] = {x:this.x+this.r2*sin, y:this.y-this.r2*cos};
+		for (var i in ps) {
+			var angle = getAngle(this.x, this.y, ps[i].x, ps[i].y);
+			if (angle < Math.PI / 2) {
+				points['NW'] = ps[i];
+			} else if (angle < Math.PI) {
+				points['NE'] = ps[i];
+			} else if (angle < 3 * Math.PI / 2) {
+				points['SE'] = ps[i];
+			} else {
+				points['SW'] = ps[i];
+			}
+		}
+		/*points['NW'] = {x:this.x-this.r1*cos, y:this.y-this.r1*sin};
 		points['NE'] = {x:this.x+this.r1*cos, y:this.y+this.r1*sin};
 		points['SE'] = {x:this.x-this.r2*sin, y:this.y+this.r2*cos};
-		points['SW'] = {x:this.x+this.r2*sin, y:this.y-this.r2*cos};
+		points['SW'] = {x:this.x+this.r2*sin, y:this.y-this.r2*cos};*/
 		return points;
 	};
 
@@ -440,8 +460,8 @@
 		if (angle > Math.PI / 2) {
 			angle = Math.PI - angle;
 		}
-		var distance = (this.x - x) * (this.x - x) + (this.y - y) * (this.y - y);
-		var baseline = this.r1 * this.r1 * Math.cos(angle) * Math.cos(angle) + this.r2 * this.r2 * Math.sin(angle) * Math.sin(angle);
+		var distance = Math.pow(this.x - x, 2) + Math.pow(this.y - y, 2);
+		var baseline = Math.pow(this.r1 * Math.cos(angle), 2) + Math.pow(this.r2 * Math.sin(angle), 2);
 		return distance < baseline;
 	};
 
@@ -460,8 +480,8 @@
 
 	EllipseArea.prototype.updateSize = function(x, y, fixRatio) {
 		console.log(this.direction);
-		var dx2 = (this.x - x) * (this.x - x);
-		var dy2 = (this.y - y) * (this.y - y);
+		var dx2 = Math.pow(this.x - x, 2);
+		var dy2 = Math.pow(this.y - y, 2);
 		if (this.direction == 0 || this.direction == 2) {
 			this.r1 = Math.sqrt(dx2 + dy2);
 			this.angle = Math.atan((this.y-y) / (this.x-x));
@@ -469,20 +489,20 @@
 			this.r2 = Math.sqrt(dx2 + dy2);
 			this.angle = Math.atan((this.y-y) / (this.x-x));
 		}
+		if (fixRatio) {
+			if (this.r1 > this.r2) {
+				this.r1 = this.r2;
+			} else {
+				this.r2 = this.r1;
+			}
+		}
 		this.angle = getAngle(this.x, this.y, x, y) - this.direction * Math.PI / 2;
 		while (this.angle < 0) this.angle += 2 * Math.PI;
 		while (this.angle >= 2 * Math.PI) this.angle -= 2 * Math.PI;
-		/*var x1 = area.x;
-		var x2 = area.x + area.width;
-		var y1 = area.y;
-		var y2 = area.y + area.height;
-		var width = Math.abs(area.width);
-		var height = Math.abs(area.height);
-		var minOrMax = {'1': Math.min, '-1': Math.max};
-		area.x = minOrMax[direction.x](x1, x2);
-		area.y = minOrMax[direction.y](y1, y2);
-		area.width = direction.x * width;
-		area.height = direction.y * height;*/
+	}
+
+	EllipseArea.prototype.checkValid = function() {
+		return this.r1 > 0 && this.r2 > 0;
 	}
 
 
@@ -491,7 +511,7 @@
 		var defaultOptions = {
 			initAreas: [],
 			deleteMethod: 'click',//or doubleClick
-			padding: 3,
+			padding: 5,
 			area: {strokeStyle: 'red', lineWidth: 2},
 			point: {size: 3, fillStyle: 'black'}, 
 			fixRatio: false, 
