@@ -6,7 +6,7 @@
 (function ($, undefined) {
 
 	console.log('jquery.areaSelect.js by Gongshw https://github.com/gongshw/jquery.areaSelect.js');
-	console.log('modified by zhangfucheng https://github.com/gongshw/jquery.areaSelect.js');
+	console.log('modified by zhangfucheng https://github.com/zeplios/jquery.areaSelect.js');
 
 	var AreaSelectStatus = {CREATE: 'create', MOVE: 'move', RESIZE: 'resize', NEAR: 'near'};
 	var AreaSelectType = {RECT: 'rect', ELLIPSE: 'ellipse'};
@@ -17,71 +17,72 @@
 		SW: {name: 'SW', x: -1, y: 1, cursor: 'nesw-resize', idx: 3}
 	};
 	var DeleteMethod = {CLICK: 'click', DOUBLE_CLICK: 'doubleClick'};
-	var areaSelectOption;
 
-	function AreaSelect($ele, options) {
-		this.$ele = $ele;
+	function createCanvasOverComponent(comp, zIndex) {
+		var $obj = $(comp);
+		var $canvas = $('<canvas/>');
+		$canvas.attr('width', $obj.width())
+			.attr('height', $obj.height())
+			.offset($obj.position())
+			.css({position: "absolute", zIndex: zIndex})
+			.appendTo($obj.parent());
+		return $canvas[0];
+	}
+
+	function createCanvas(width, height) {
+		var $canvas = $('<canvas/>');
+		$canvas.attr('width', width)
+			.attr('height', height);
+		return $canvas[0];
+	}
+
+	function AreaSelect($comp, options) {
+		this.base = $comp[0];
 		this.init();
 		this.areas = Array();
-		this.maskCanvas = Array();
+		this.maskCanvases = Array();
+		this.options = options;
+		this.status = AreaSelectStatus.CREATE;
+		this.dragging = false;
+		this.resizeDirection = null;
+		this.dragAreaOffset = {};
 		if (options.initAreas) {
 			for (var index in options.initAreas) {
-				var $canvas_mask = $('<canvas style="display:none"/>');
-				$canvas_mask.attr('width', $ele.width())
-					.attr('height', $ele.height())
-					.offset($ele.position())
-					.css({position: "absolute", zIndex: 10})
-					.appendTo($ele.parent());
+				var mCanvas = createCanvasOverComponent(this.base, 10);
+				$(mCanvas).css('display', 'none');
 				var area = options.initAreas[index];
 				if (area.type == AreaSelectType.RECT) {
-					this.maskCanvas.push($canvas_mask[0]);
+					this.maskCanvases.push(mCanvas);
 					this.areas.push(new RectArea(area.x, area.y, area.width, area.height));
 				} else if (area.type == AreaSelectType.ELLIPSE) {
-					this.maskCanvas.push($canvas_mask[0]);
+					this.maskCanvases.push(mCanvas);
 					this.areas.push(new EllipseArea(area.x, area.y, area.r1, area.r2, area.angle));
 				}
 				
 			}
 		}
-		areaSelectOption = options;
-		this.options = options;
-		this.status = AreaSelectStatus.CREATE;
-		this.fixRatio = options.fixRatio;
-		this.type = options.type;
-		this.dragging = false;
-		this.resizeDirection = null;
-		this.dragAreaOffset = {};
 		this.draw();
 	}
 
 	AreaSelect.prototype.get = function () {
-		var canvas = Array();
+		var canvases = Array();
 		for (var i in this.areas) {
-			canvas.push(this.areas[i].getAreas(this.$ele, this.maskCanvas[i]));
+			canvases.push(this.areas[i].getAreas(this.base, this.maskCanvases[i]));
 		}
-		//return this.areas;
-		return canvas;
+		return canvases;
 	};
 
 	AreaSelect.prototype.bindChangeEvent = function (handle) {
-		this.$canvas.on("areasChange", handle[0]);
+		$(this.canvas).on("areasChange", handle[0]);
 	};
 
 	AreaSelect.prototype.init = function () {
-		var $canvas = $('<canvas/>');
-		$canvas.attr('width', this.$ele.width())
-			.attr('height', this.$ele.height())
-			.offset(this.$ele.position())
-			.css({
-				position: "absolute",
-				zIndex: 1000000
-			})
-			.appendTo(this.$ele.parent());
-		this.$canvas = $canvas;
-		this.g2d = $canvas[0].getContext('2d');
+		var canvas = createCanvasOverComponent(this.base, 1000000);
+		this.canvas = canvas;
 		var as = this;
 		var moveDownPoint = {};
-		$canvas.mousemove(function (event) {
+
+		$(canvas).mousemove(function (event) {
 			var offsetX = get_offset_X(event);
 			var offsetY = get_offset_Y(event);
 			if (as.dragging) {
@@ -112,14 +113,10 @@
 				this.dragAreaOffset = {x: this.currentArea.x - x, y: this.currentArea.y - y};
 				break;
 			case AreaSelectStatus.CREATE:
-				var $canvas = $('<canvas style="display:none"/>');
-				$canvas.attr('width', this.$ele.width())
-					.attr('height', this.$ele.height())
-					.offset(this.$ele.position())
-					.css({position: "absolute", zIndex: 1000000})
-					.appendTo(this.$ele.parent());
+				var canvas = createCanvasOverComponent(this.base, 10);
+				$(canvas).css('display', 'none');
 				var newArea = new RectArea(x, y, 0, 0);
-				this.maskCanvas.push($canvas[0]);
+				this.maskCanvases.push(canvas);
 				this.areas.push(newArea);
 				this.currentArea = newArea;
 				this.status = AreaSelectStatus.RESIZE;
@@ -134,21 +131,20 @@
 				if (this.currentArea != undefined) {
 					if (this.currentArea.checkValid()) {
 						setAreaDirection(this.currentArea, Direction.SE);
-						if (event.ctrlKey) {
-							var oldArea = this.currentArea;
-							var newArea = new EllipseArea(oldArea.x + oldArea.width / 2, oldArea.y + oldArea.height / 2, 
-															oldArea.width / 2, oldArea.height / 2, 0);
-							var index = this.deleteArea(oldArea);
-							var canvas = this.maskCanvas[index];
-							this.maskCanvas.splice(index, 1);
+						if (this.options.type == AreaSelectType.ELLIPSE || event.ctrlKey) {
+							var x = this.currentArea.x, y = this.currentArea.y;
+							var w = this.currentArea.width, h = this.currentArea.height;
+							var newArea = new EllipseArea(x + w/2, y + h/2,	w/2, h/2, 0);
+							var index = this.deleteArea(this.currentArea);
+							var canvas = this.maskCanvases.splice(index, 1)[0];
 							this.currentArea = newArea;
 							this.areas.push(newArea);
-							this.maskCanvas.push(canvas);
+							this.maskCanvases.push(canvas);
 						}
 						this.triggerChange();
 					} else {
 						var index = this.deleteArea(this.currentArea);
-						this.maskCanvas.splice(index, 1);
+						this.maskCanvases.splice(index, 1);
 						this.currentArea = undefined;
 						this.status = AreaSelectStatus.CREATE;
 					}
@@ -162,7 +158,7 @@
 
 	AreaSelect.prototype.onMouseMoving = function (x, y) {
 		var area = this.getArea(x, y, this.options.padding);
-		var $canvas = this.$canvas;
+		var $canvas = $(this.canvas);
 		if (area != undefined) {
 			this.currentArea = area;
 			var nearDrag = false;
@@ -198,7 +194,7 @@
 		var area = this.currentArea;
 		switch (this.status) {
 			case AreaSelectStatus.RESIZE:
-				area.updateSize(x, y, this.fixRatio);
+				area.updateSize(this, x, y);
 				break;
 			case AreaSelectStatus.MOVE:
 				area.x = (x + this.dragAreaOffset.x);
@@ -228,21 +224,21 @@
 	};
 
 	AreaSelect.prototype.draw = function () {
-		var g2d = this.g2d;
+		var g2d = this.canvas.getContext('2d');
 		/* clear canvas */
-		g2d.clearRect(0, 0, this.$canvas[0].width, this.$canvas[0].height);
+		g2d.clearRect(0, 0, this.canvas.width, this.canvas.height);
 		/* draw areas */
 		g2d.strokeStyle = this.options.area.strokeStyle;
 		g2d.lineWidth = this.options.area.lineWidth;
 		for (var index in this.areas) {
 			var area = this.areas[index];
-			area.draw(g2d, this.maskCanvas[index]);
+			area.draw(this.canvas, this.maskCanvases[index]);
 		}
 		/* draw current area */
 		var area = this.currentArea;
 		g2d.fillStyle = this.options.point.fillStyle;
 		if (area != undefined) {
-			area.drawControlPoints(g2d);
+			area.drawControlPoints(this, g2d);
 		}
 	};
 
@@ -250,7 +246,7 @@
 		var areas = this.areas;
 		var index = areas.indexOf(area);
 		if (index >= 0) {
-			areas.splice(areas.indexOf(area), 1);
+			areas.splice(index, 1);
 			this.currentArea = undefined;
 			this.triggerChange();
 			this.status = AreaSelectStatus.CREATE;
@@ -269,7 +265,7 @@
 	};
 
 	AreaSelect.prototype.triggerChange = function () {
-		this.$canvas.trigger("areasChange", {areas: this.get()});
+		$(this.canvas).trigger("areasChange", {areas: this.get()});
 	};
 
 	var setAreaDirection = function (area, direction) {
@@ -309,23 +305,24 @@
 	};
 
 	function RectArea(x, y, width, height) {
+		this.type = 'rect';
 		this.x = x;
 		this.y = y;
 		this.width = width;
 		this.height = height;
 	}
 
-	RectArea.prototype.draw = function(g2d, g2d_mask) {
-		g2d.strokeRect(this.x, this.y, this.width, this.height);
+	RectArea.prototype.draw = function(canvas, maskCanvas) {
+		canvas.getContext('2d').strokeRect(this.x, this.y, this.width, this.height);
 	}
 
-	RectArea.prototype.drawControlPoints = function(g2d) {
+	RectArea.prototype.drawControlPoints = function(as, g2d) {
 		var positionPoints = this.getPositionPoints();
 		/* draw position point */
 		for (var index in positionPoints) {
 			var point = positionPoints[index];
 			g2d.beginPath();
-			g2d.arc(point.x, point.y, areaSelectOption.point.size, 0, Math.PI * 2, true);
+			g2d.arc(point.x, point.y, as.options.point.size, 0, Math.PI * 2, true);
 			g2d.closePath();
 			g2d.fill();
 		}
@@ -377,10 +374,10 @@
 		this.height = direction.y * height;
 	}
 
-	RectArea.prototype.updateSize = function(x, y, fixRatio) {
+	RectArea.prototype.updateSize = function(as, x, y) {
 		this.width = x - this.x;
 		this.height = y - this.y;
-		if (fixRatio) {
+		if (as.options.fixRatio) {
 			var widthToHeight = Math.abs(this.width) / Math.abs(this.height);
 			if (widthToHeight < 1) {
 				this.height = this.height * widthToHeight;
@@ -394,7 +391,15 @@
 		return this.width > 0 && this.height > 0;
 	}
 
+	RectArea.prototype.getAreas = function(component, maskCanvas) {
+		var newCanvas = createCanvas(this.width, this.height);
+		var newG2d = newCanvas.getContext("2d");
+		newG2d.drawImage(component, -this.x, -this.y);
+		return newCanvas;
+	}
+
 	function EllipseArea(x, y, r1, r2, angle) {
+		this.type = 'ellipse';
 		this.x = x; // center x
 		this.y = y;
 		this.r1 = r1; // horizontal axis
@@ -402,7 +407,7 @@
 		this.angle = angle ? angle : 0;
 	}
 
-	EllipseArea.prototype.draw = function(g2d, maskCanvas) {
+	EllipseArea.prototype.draw = function(canvas, maskCanvas) {
 		var g2d_mask = maskCanvas.getContext('2d');
 		g2d_mask.clearRect(0, 0, maskCanvas.width, maskCanvas.height);
 		var r = this.r1 > this.r2 ? this.r1 : this.r2;
@@ -412,12 +417,7 @@
 		var sin = Math.sin(this.angle);
 		var cos = Math.cos(this.angle);
 
-		/*g2d.beginPath();
-		g2d.setTransform(ratioX*cos, sin, -sin, ratioY*cos, this.x, this.y);
-		g2d.arc(0, 0, r, 0, 2 * Math.PI);
-		g2d.closePath(); 
-		g2d.stroke();*/
-
+		var g2d = canvas.getContext('2d');
 		g2d.beginPath();
 		g2d.translate(this.x, this.y);
 		g2d.rotate(this.angle);
@@ -428,7 +428,7 @@
 		g2d.stroke();
 		g2d.scale(1 / ratioX, 1 / ratioY);
 		g2d.translate(this.x, this.y);
-		g2d.rotate(2*Math.PI - this.angle);
+		g2d.rotate(-this.angle);
 		g2d.translate(-this.x, -this.y);
 		g2d.beginPath();
 		g2d.moveTo(this.x-this.r1*cos, this.y-this.r1*sin);
@@ -449,17 +449,17 @@
 		g2d_mask.fill();
 		g2d_mask.scale(1 / ratioX, 1 / ratioY);
 		g2d_mask.translate(this.x, this.y);
-		g2d_mask.rotate(2*Math.PI - this.angle);
+		g2d_mask.rotate(-this.angle);
 		g2d_mask.translate(-this.x, -this.y);
 	}
 
-	EllipseArea.prototype.drawControlPoints = function(g2d) {
+	EllipseArea.prototype.drawControlPoints = function(as, g2d) {
 		var positionPoints = this.getPositionPoints();
 		/* draw position point */
 		for (var index in positionPoints) {
 			var point = positionPoints[index];
 			g2d.beginPath();
-			g2d.arc(point.x, point.y, areaSelectOption.point.size, 0, Math.PI * 2, true);
+			g2d.arc(point.x, point.y, as.options.point.size, 0, Math.PI * 2, true);
 			g2d.closePath();
 			g2d.fill();
 		}
@@ -491,15 +491,15 @@
 
 	EllipseArea.prototype.isInArea = function (x, y, padding) {
 		padding = padding === undefined ? 0 : padding;
-		var angle = Math.atan((this.y-y) / (this.x-x)) - this.angle;
+		var angle = getAngle(this.x, this.y, x, y) - this.angle;
 		while (angle >= Math.PI) angle -= Math.PI;
 		while (angle < 0) angle += Math.PI;
 		if (angle > Math.PI / 2) {
 			angle = Math.PI - angle;
 		}
 		var distance = Math.pow(this.x - x, 2) + Math.pow(this.y - y, 2);
-		var baseline = Math.pow(this.r1 * Math.cos(angle), 2) + Math.pow(this.r2 * Math.sin(angle), 2);
-		return distance < baseline;
+		var baseline = this.r1 * Math.pow(Math.cos(angle), 2) + this.r2 * Math.pow(Math.sin(angle), 2);
+		return distance < Math.pow(baseline, 2);
 	};
 
 	EllipseArea.prototype.setAreaDirection = function(direction) {
@@ -514,7 +514,7 @@
 		}
 	}
 
-	EllipseArea.prototype.updateSize = function(x, y, fixRatio) {
+	EllipseArea.prototype.updateSize = function(as, x, y) {
 		var dx2 = Math.pow(this.x - x, 2);
 		var dy2 = Math.pow(this.y - y, 2);
 		if (this.direction == 0 || this.direction == 2) {
@@ -524,7 +524,7 @@
 			this.r2 = Math.sqrt(dx2 + dy2);
 			this.angle = Math.atan((this.y-y) / (this.x-x));
 		}
-		if (fixRatio) {
+		if (as.options.fixRatio) {
 			if (this.r1 > this.r2) {
 				this.r1 = this.r2;
 			} else {
@@ -540,17 +540,18 @@
 		return this.r1 > 0 && this.r2 > 0;
 	}
 
-	EllipseArea.prototype.getAreas = function($ele, maskCanvas) {
-		var g2d_mask = maskCanvas.getContext('2d');
+	EllipseArea.prototype.getAreas = function(component, maskCanvas) {
+		var maskG2d = maskCanvas.getContext('2d');
 		var width = maskCanvas.width;
 		var height = maskCanvas.height;
-		var image_data = g2d_mask.getImageData(0, 0, width, height);
+		var maskData = maskG2d.getImageData(0, 0, width, height);
 
+		// find bounds
 		var xmax = 0, xmin = width, ymax = 0, ymin = height;
 		for (var i = 0 ; i < width ; i++) {
 			for (var j = 0 ; j < height ; j++) {
 				var pos = i + j * width;
-				var val = image_data.data[pos*4+3];
+				var val = maskData.data[pos*4+3];
 				if (val == 255) {
 					if (i > xmax) xmax = i;
 					if (i < xmin) xmin = i;
@@ -559,43 +560,41 @@
 				}
 			}
 		}
+
 		var nWidth = xmax - xmin + 1;
 		var nHeight = ymax - ymin + 1;
-		var $new_canvas = $('<canvas/>');
-		$new_canvas.attr('width', nWidth)
-			.attr('height', nHeight);
-		var ctx = $new_canvas[0].getContext("2d");
+		var newCanvas = createCanvas(nWidth, nHeight);
+		var newG2d = newCanvas.getContext("2d");
 
-		var $canvas = $('<canvas/>');
-		$canvas.attr('width', $ele.width()).attr('height', $ele.height())
-		var g2d = $canvas[0].getContext('2d');
-    	g2d.drawImage($ele[0], 0, 0);
+		var baseCanvas = createCanvas($(component).width(), $(component).height());
+		var baseG2d = baseCanvas.getContext('2d');
+    	baseG2d.drawImage(component, 0, 0);
     	
-		var raw_image_data;
+		var baseData;
 		try {
-			raw_image_data = g2d.getImageData(0, 0, width, height);
+			baseData = baseG2d.getImageData(0, 0, width, height);
 		} catch (e) {
-			ctx.drawImage($ele[0], -xmin, -ymin);
-			return $new_canvas;
+			newG2d.drawImage(component, -xmin, -ymin);
+			return newCanvas;
 		}
 
 		
-		var imgData = ctx.createImageData(nWidth, nHeight);
+		var newData = newG2d.createImageData(nWidth, nHeight);
 		for (var i = 0 ; i < nWidth ; i++) {
 			for (var j = 0 ; j < nHeight ; j++) {
 				var pos = (i + xmin) + (j + ymin) * width;
 				var nPos = i + j * nWidth;
-				var val = image_data.data[pos*4+3];
+				var val = maskData.data[pos*4+3];
 				if (val == 255) {
-					imgData.data[nPos*4] = raw_image_data.data[pos*4];
-					imgData.data[nPos*4+1] = raw_image_data.data[pos*4+1];
-					imgData.data[nPos*4+2] = raw_image_data.data[pos*4+2];
-					imgData.data[nPos*4+3] = raw_image_data.data[pos*4+3];
+					newData.data[nPos*4] = baseData.data[pos*4];
+					newData.data[nPos*4+1] = baseData.data[pos*4+1];
+					newData.data[nPos*4+2] = baseData.data[pos*4+2];
+					newData.data[nPos*4+3] = baseData.data[pos*4+3];
 				}
 			}
 		}
-		ctx.putImageData(imgData,0,0);
-		return $new_canvas;
+		newG2d.putImageData(newData, 0, 0);
+		return newCanvas;
 	}
 
 
